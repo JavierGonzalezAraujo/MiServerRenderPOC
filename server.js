@@ -58,9 +58,11 @@ app.get('/get-auth-url', async (req, res) => {
     const response = await axios.get('https://authorize.com/auth/oauth/v2/authorize', {
       params: {
         response_type: 'code',
-        client_id: 'TU_CLIENT_ID',
-        redirect_uri: 'https://TUSERVIDOR.onrender.com/redirect',
-        scope: 'openid profile',
+        client_id: '170773573158',
+        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+        code_challenge: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
+        code_challenge_method: 'S256',
+        scope: 'openid',
         state,
       },
       maxRedirects: 0,
