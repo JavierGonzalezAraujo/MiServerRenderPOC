@@ -1,89 +1,99 @@
 const express = require('express');
-const app = express();
 const path = require('path');
+const app = express();
 
-// En memoria, solo para pruebas (se reinicia con cada arranque del server)
-const sessions = {};
-
-// Para servir archivos estáticos si quieres
+// Servir archivos estáticos si los usas
 app.use(express.static('public'));
 
-// Ruta que recibe la redirección de authorize.com
-app.get('/redirect', (req, res) => {
-  const { code, state } = req.query;
-
-  if (!state) {
-    return res.status(400).send('Missing state');
-  }
-
-  // Guardamos los datos temporalmente
-  sessions[state] = { code, receivedAt: Date.now() };
-
-  // Redirigimos a la página del cliente que está escuchando
-  return res.redirect(`/show?state=${encodeURIComponent(state)}`);
-});
-
-// Ruta que muestra una página que hace polling para obtener su code
-app.get('/show', (req, res) => {
-  const { state } = req.query;
-
-  if (!state) {
-    return res.status(400).send('Missing state');
-  }
-
+// Página inicial del onboarding
+app.get('/start', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Esperando autorización...</title>
+        <title>Inicio del Onboarding</title>
         <style>
-          body { font-family: Arial; padding: 2rem; background-color: #f5f5f5; }
-          .box { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+          body { font-family: Arial; padding: 2rem; }
+          button { padding: 1rem; font-size: 1rem; cursor: pointer; }
         </style>
       </head>
       <body>
-        <div class="box">
-          <h1>Esperando autenticación...</h1>
-          <div id="result">Esperando respuesta del servidor...</div>
-        </div>
+        <h1>Iniciar Onboarding</h1>
+        <button onclick="startOnboarding()">Iniciar</button>
 
         <script>
-          const state = "${state}";
-          async function checkStatus() {
-            try {
-              const res = await fetch("/status?state=" + state);
-              const data = await res.json();
-
-              if (data.code) {
-                document.getElementById("result").innerHTML = 
-                  "<p><strong>Code:</strong> " + data.code + "</p>";
-              } else {
-                setTimeout(checkStatus, 2000); // Reintenta en 2 segundos
-              }
-            } catch (err) {
-              console.error(err);
-              document.getElementById("result").textContent = "Error consultando el estado.";
-            }
+          function generateState() {
+            return 'state_' + Math.random().toString(36).substr(2, 9);
           }
 
-          checkStatus();
+          function startOnboarding() {
+            const state = generateState();
+
+            // Abrimos la ventana que quedará escuchando el resultado
+            window.open('/show?state=' + state, '_blank');
+
+            // Redirigimos al usuario a la URL de autorización
+            const authUrl = new URL('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize');
+            authUrl.searchParams.set('response_type', 'code');
+            authUrl.searchParams.set('client_id', '170773573158');
+            authUrl.searchParams.set('redirect_uri', 'https://miserverrenderpoc.onrender.com/redirect');
+            authUrl.searchParams.set('scope', 'openid');
+            authUrl.searchParams.set('code_challenge_method', 'S256');
+            authUrl.searchParams.set('state', state);
+
+            window.location.href = authUrl.toString();
+          }
         </script>
       </body>
     </html>
   `);
 });
 
-// Endpoint que devuelve el estado actual del state
-app.get('/status', (req, res) => {
-  const { state } = req.query;
-  if (state && sessions[state]) {
-    return res.json(sessions[state]);
-  }
-  res.json({ code: null });
+// Página que muestra el resultado
+app.get('/show', (req, res) => {
+  const { code, state } = req.query;
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Callback Info</title>
+        <style>
+          body { font-family: Arial; padding: 2rem; background-color: #f5f5f5; }
+          h1 { color: #0070f3; }
+          .box { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        </style>
+      </head>
+      <body>
+        <div class="box">
+          <h1>Code y State recibidos</h1>
+          <p><strong>Code:</strong> ${code || 'Esperando...'}</p>
+          <p><strong>State:</strong> ${state || 'Desconocido'}</p>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
-// Inicializa el servidor
+// Redirección tras login
+app.get('/redirect', (req, res) => {
+  const { code, state } = req.query;
+  const userAgent = req.headers['user-agent'] || '';
+
+  const isAndroid = /Android/.test(userAgent);
+  const isIOS = /iPhone|iPad/.test(userAgent);
+
+  if (isAndroid || isIOS) {
+    const uri = `bbvapoc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    return res.redirect(uri);
+  } else {
+    const uri = `/show?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    return res.redirect(uri);
+  }
+});
+
+// Puerto de escucha
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('Servidor corriendo en http://localhost:' + PORT);
+  console.log(\`Servidor corriendo en http://localhost:\${PORT}/start\`);
 });
