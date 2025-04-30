@@ -1,17 +1,18 @@
 const express = require('express');
-const path = require('path');
+const axios = require('axios');
 const app = express();
 
-// Servir archivos estáticos si los usas
+const authStates = {}; // { [state]: { code, timestamp } }
+
 app.use(express.static('public'));
 
-// Página inicial del onboarding
+// Paso 1: página de inicio
 app.get('/start', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Inicio del Onboarding</title>
+        <title>Iniciar Onboarding</title>
         <style>
           body { font-family: Arial; padding: 2rem; }
           button { padding: 1rem; font-size: 1rem; cursor: pointer; }
@@ -19,29 +20,28 @@ app.get('/start', (req, res) => {
       </head>
       <body>
         <h1>Iniciar Onboarding</h1>
-        <button onclick="startOnboarding()">Iniciar</button>
+        <button onclick="startFlow()">Iniciar</button>
 
         <script>
-          function generateState() {
-            return 'state_' + Math.random().toString(36).substr(2, 9);
-          }
+          async function startFlow() {
+            const state = 'state_' + Math.random().toString(36).substring(2);
 
-          function startOnboarding() {
-            const state = generateState();
+            // Pide la URL del login
+            const res = await fetch('/get-auth-url?state=' + state);
+            const data = await res.json();
 
-            // Abrimos la ventana que quedará escuchando el resultado
-            window.open('/show?state=' + state, '_blank');
+            // Abre nueva pestaña al login
+            window.open(data.authUrl, '_blank');
 
-            // Redirigimos al usuario a la URL de autorización
-            const authUrl = new URL('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize');
-            authUrl.searchParams.set('response_type', 'code');
-            authUrl.searchParams.set('client_id', '170773573158');
-            authUrl.searchParams.set('redirect_uri', 'https://miserverrenderpoc.onrender.com/redirect');
-            authUrl.searchParams.set('scope', 'openid');
-            authUrl.searchParams.set('code_challenge_method', 'S256');
-            authUrl.searchParams.set('state', state);
-
-            window.location.href = authUrl.toString();
+            // Empieza a hacer polling hasta que esté listo
+            const interval = setInterval(async () => {
+              const pollRes = await fetch('/poll?state=' + state);
+              const pollData = await pollRes.json();
+              if (pollData.ready) {
+                clearInterval(interval);
+                window.location.href = '/show?code=' + encodeURIComponent(pollData.code) + '&state=' + encodeURIComponent(state);
+              }
+            }, 1000);
           }
         </script>
       </body>
@@ -49,50 +49,84 @@ app.get('/start', (req, res) => {
   `);
 });
 
-// Página que muestra el resultado
+// Paso 2: generar la URL de login
+app.get('/get-auth-url', async (req, res) => {
+  const { state } = req.query;
+
+  // Aquí iría tu petición real a authorize.com si fuera POST. Suponiendo que puedes hacer un GET y te responde con 302:
+  try {
+    const response = await axios.get('https://authorize.com/auth/oauth/v2/authorize', {
+      params: {
+        response_type: 'code',
+        client_id: 'TU_CLIENT_ID',
+        redirect_uri: 'https://TUSERVIDOR.onrender.com/redirect',
+        scope: 'openid profile',
+        state,
+      },
+      maxRedirects: 0,
+      validateStatus: status => status === 302,
+    });
+
+    const authUrl = response.headers.location;
+    res.json({ authUrl });
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo URL de autorización' });
+  }
+});
+
+// Paso 3: login redirige aquí
+app.get('/redirect', (req, res) => {
+  const { code, state } = req.query;
+  authStates[state] = { code, timestamp: Date.now() };
+
+  // Puedes redirigir a una página que diga "proceso completado", o cerrar la pestaña
+  res.send(`
+    <html>
+      <body>
+        <script>
+          window.close();
+        </script>
+        <p>Onboarding completado. Puedes cerrar esta pestaña.</p>
+      </body>
+    </html>
+  `);
+});
+
+// Paso 4: polling del navegador original
+app.get('/poll', (req, res) => {
+  const { state } = req.query;
+  const result = authStates[state];
+  if (result) {
+    res.json({ ready: true, code: result.code });
+  } else {
+    res.json({ ready: false });
+  }
+});
+
+// Paso 5: página que muestra el resultado final
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
-
   res.send(`
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Callback Info</title>
+        <title>Resultado del Onboarding</title>
         <style>
           body { font-family: Arial; padding: 2rem; background-color: #f5f5f5; }
-          h1 { color: #0070f3; }
           .box { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         </style>
       </head>
       <body>
         <div class="box">
-          <h1>Code y State recibidos</h1>
-          <p><strong>Code:</strong> ${code || 'Esperando...'}</p>
-          <p><strong>State:</strong> ${state || 'Desconocido'}</p>
+          <h1>Autenticación completada</h1>
+          <p><strong>Code:</strong> ${code || 'N/A'}</p>
+          <p><strong>State:</strong> ${state || 'N/A'}</p>
         </div>
       </body>
     </html>
   `);
 });
 
-// Redirección tras login
-app.get('/redirect', (req, res) => {
-  const { code, state } = req.query;
-  const userAgent = req.headers['user-agent'] || '';
-
-  const isAndroid = /Android/.test(userAgent);
-  const isIOS = /iPhone|iPad/.test(userAgent);
-
-  if (isAndroid || isIOS) {
-    const uri = `bbvapoc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    return res.redirect(uri);
-  } else {
-    const uri = `/show?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    return res.redirect(uri);
-  }
-});
-
-// Puerto de escucha
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('Servidor corriendo');
