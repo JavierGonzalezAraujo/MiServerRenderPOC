@@ -55,7 +55,7 @@ app.get('/get-auth-url', async (req, res) => {
 
   // Aquí iría tu petición real a authorize.com si fuera POST. Suponiendo que puedes hacer un GET y te responde con 302:
   try {
-    const response = await axios.get('https://authorize.com/auth/oauth/v2/authorize', {
+    const response = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
       params: {
         response_type: 'code',
         client_id: '170773573158',
