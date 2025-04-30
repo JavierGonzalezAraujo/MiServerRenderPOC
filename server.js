@@ -95,5 +95,5 @@ app.get('/redirect', (req, res) => {
 // Puerto de escucha
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(\`Servidor corriendo en http://localhost:\${PORT}/start\`);
+  console.log('Servidor corriendo');
 });
