@@ -98,12 +98,7 @@ app.get('/redirect', (req, res) => {
       <body>
       <script>
       // Redirigir con window.location
-      window.location = "my_app_name://payment";
-
-      // Fallback a la tienda en caso de que la app no esté instalada
-      setTimeout(function() {
-        window.location = "https://play.google.com/store/apps/details?id=com.yourcompany.appname";
-      }, 1500); // Tiempo de espera antes de redirigir
+      window.location = "${callbackUrl}";
     </script>
     </body>
       </html>
