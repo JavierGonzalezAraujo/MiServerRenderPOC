@@ -81,27 +81,41 @@ app.get('/redirect', (req, res) => {
   const { code, state } = req.query;
   authStates[state] = { code, timestamp: Date.now() };
 
-  const userAgent = req.headers['user-agent'] || '';
-  const isMobile = /iPhone|iPad|Android/i.test(userAgent);
-  const callbackUrl = `bbva_poc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+  const ua = req.headers['user-agent'] || '';
+  const isMobileUA = /iphone|ipad|android/i.test(ua);
+  const isFromApp = state && state.startsWith('mobile_');  // Detectamos por el prefijo
 
-  if (isMobile) {
-    // Redirige automáticamente + fallback manual
+  console.log(`Redirect received. State: ${state}, User-Agent: ${ua}`);
+
+  if (isMobileUA || isFromApp) {
+    const callbackUrl = `bbva_poc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+
     res.send(`
       <html>
+        <head>
+          <meta http-equiv="refresh" content="0;url=${callbackUrl}" />
+          <title>Redirigiendo...</title>
+        </head>
         <body>
           <p>Redirigiendo a la app móvil...</p>
           <script>
             window.location.href = '${callbackUrl}';
+            // Intento doble por si acaso
+            setTimeout(() => {
+              window.location.href = '${callbackUrl}';
+            }, 1000);
           </script>
           <p>Si no se abre automáticamente, <a href="${callbackUrl}">haz clic aquí para continuar</a>.</p>
         </body>
       </html>
     `);
   } else {
-    // Comportamiento actual para navegadores normales
+    // Comportamiento original (navegador web)
     res.send(`
       <html>
+        <head>
+          <title>Onboarding completado</title>
+        </head>
         <body>
           <script>
             window.close();
@@ -112,6 +126,7 @@ app.get('/redirect', (req, res) => {
     `);
   }
 });
+
 
 
 // Paso 4: polling del navegador original
