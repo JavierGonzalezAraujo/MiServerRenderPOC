@@ -93,18 +93,24 @@ app.get('/redirect', (req, res) => {
     res.send(`
       <html>
         <head>
-          <meta http-equiv="refresh" content="0;url=${callbackUrl}" />
-          <title>Redirigiendo...</title>
+          <title>Redirigiendo a la app...</title>
         </head>
         <body>
           <p>Redirigiendo a la app móvil...</p>
-          <script>
-            window.location.href = '${callbackUrl}';
-            // Intento doble por si acaso
-            setTimeout(() => {
-              window.location.href = '${callbackUrl}';
-            }, 1000);
-          </script>
+            <script>
+              (function() {
+                window.location.href = '${callbackUrl}';
+                // Intento extra después de 1 segundo por si acaso falla el primero
+                setTimeout(() => {
+                  window.location.href = '${callbackUrl}';
+                }, 1000);
+            
+                // Opcional: cerrar la ventana tras 3 segundos
+                setTimeout(() => {
+                  window.close();
+                }, 3000);
+              })();
+            </script>
           <p>Si no se abre automáticamente, <a href="${callbackUrl}">haz clic aquí para continuar</a>.</p>
         </body>
       </html>
