@@ -121,8 +121,6 @@ app.get('/redirect', (req, res) => {
   }
 });
 
-
-
 // Paso 4: polling del navegador original
 app.get('/poll', (req, res) => {
   const { state } = req.query;
