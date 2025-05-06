@@ -82,7 +82,6 @@ app.get('/redirect', (req, res) => {
   authStates[state] = { code, timestamp: Date.now() };
 
   console.log('Redirect recibido:', { code, state });
-  console.log('Redirect recibido:', { authStates[state] });
 
 
 
