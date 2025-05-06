@@ -89,7 +89,7 @@ app.get('/redirect', (req, res) => {
 
   if (isMobileUA || isFromApp) {
     const callbackUrl = `bbva_poc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    console.log(${callbackUrl});
+    console.log(callbackUrl);
     res.send(`
       <html>
         <head>
