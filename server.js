@@ -94,16 +94,8 @@ app.get('/redirect', (req, res) => {
       <html>
         <head>
           <title>Redirigiendo a la app...</title>
+          <meta http-equiv="refresh" content="0;url=my_app_name://payment" />
         </head>
-        <body>
-          <p>Redirigiendo a la app móvil...</p>
-            <script>
-            setTimeout(function() {
-              window.location.href = '${callbackUrl}';
-            }, 100); // pequeño retardo ayuda en algunos casos
-            </script>
-          <p>Si no se abre automáticamente, <a href="${callbackUrl}">haz clic aquí para continuar</a>.</p>
-        </body>
       </html>
     `);
   } else {
