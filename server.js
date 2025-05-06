@@ -94,8 +94,18 @@ app.get('/redirect', (req, res) => {
       <html>
         <head>
           <title>Redirigiendo a la app...</title>
-          <meta http-equiv="refresh" content="0;url=my_app_name://payment" />
         </head>
+      <body>
+      <script>
+      // Redirigir con window.location
+      window.location = "my_app_name://payment";
+
+      // Fallback a la tienda en caso de que la app no esté instalada
+      setTimeout(function() {
+        window.location = "https://play.google.com/store/apps/details?id=com.yourcompany.appname";
+      }, 1500); // Tiempo de espera antes de redirigir
+    </script>
+    </body>
       </html>
     `);
   } else {
