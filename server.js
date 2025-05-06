@@ -81,6 +81,11 @@ app.get('/redirect', (req, res) => {
   const { code, state } = req.query;
   authStates[state] = { code, timestamp: Date.now() };
 
+  console.log('Redirect recibido:', { code, state });
+  console.log('Redirect recibido:', { authStates[state] });
+
+
+
   const ua = req.headers['user-agent'] || '';
   const isMobileUA = /iphone|ipad|android/i.test(ua);
   const isFromApp = state && state.startsWith('mobile_');  // Detectamos por el prefijo
