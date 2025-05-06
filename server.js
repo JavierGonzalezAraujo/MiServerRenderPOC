@@ -81,18 +81,38 @@ app.get('/redirect', (req, res) => {
   const { code, state } = req.query;
   authStates[state] = { code, timestamp: Date.now() };
 
-  // Puedes redirigir a una página que diga "proceso completado", o cerrar la pestaña
-  res.send(`
-    <html>
-      <body>
-        <script>
-          window.close();
-        </script>
-        <p>Onboarding completado. Puedes cerrar esta pestaña.</p>
-      </body>
-    </html>
-  `);
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /iPhone|iPad|Android/i.test(userAgent);
+  const callbackUrl = `bbva_poc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+
+  if (isMobile) {
+    // Redirige automáticamente + fallback manual
+    res.send(`
+      <html>
+        <body>
+          <p>Redirigiendo a la app móvil...</p>
+          <script>
+            window.location.href = '${callbackUrl}';
+          </script>
+          <p>Si no se abre automáticamente, <a href="${callbackUrl}">haz clic aquí para continuar</a>.</p>
+        </body>
+      </html>
+    `);
+  } else {
+    // Comportamiento actual para navegadores normales
+    res.send(`
+      <html>
+        <body>
+          <script>
+            window.close();
+          </script>
+          <p>Onboarding completado. Puedes cerrar esta pestaña.</p>
+        </body>
+      </html>
+    `);
+  }
 });
+
 
 // Paso 4: polling del navegador original
 app.get('/poll', (req, res) => {
