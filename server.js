@@ -24,7 +24,7 @@ app.get('/start', (req, res) => {
 
         <script>
           async function startFlow() {
-            const state = 'mobile_' + Math.random().toString(36).substring(2);
+            const state = 'web_OAuth' + Math.random().toString(36).substring(2);
             const res = await fetch('/get-auth-url?state=' + state);
             const data = await res.json();
             window.open(data.authUrl, '_blank');
