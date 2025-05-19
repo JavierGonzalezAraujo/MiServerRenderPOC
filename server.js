@@ -72,6 +72,7 @@ app.get('/get-auth-url', async (req, res) => {
 
 // Redirección de BBVA OAuth y 2FA
 app.get('/redirect', (req, res) => {
+  console.log(req.query);
   const { code, state, status, '2FASESSID': sessId } = req.query;
 
   if (!state) {
@@ -88,6 +89,8 @@ app.get('/redirect', (req, res) => {
   const ua = req.headers['user-agent'] || '';
   const isMobileUA = /iphone|ipad|android/i.test(ua);
   const isFromApp = state.startsWith('mobile_');
+
+  console.log(isFromApp);
 
   const params = new URLSearchParams();
   if (code) params.append('code', code);
