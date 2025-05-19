@@ -87,36 +87,40 @@ app.get('/redirect', (req, res) => {
   const isMobileUA = /iphone|ipad|android/i.test(ua);
   const isFromApp = state && state.startsWith('mobile_');  // Detectamos por el prefijo
 
-  console.log(`Redirect received. State: ${state}, User-Agent: ${ua}`);
+  console.log(`Redirect received. UA: ${ua}, State: ${state}, 2FASESSID: ${sessId}, Status: ${status}`);
 
+  // Construir deep link
+  let callbackUrl = `bbvapoc://callback`;
+
+  const params = new URLSearchParams();
+  if (code) params.append('code', code);
+  if (state) params.append('state', state);
+  if (sessId) params.append('2FASESSID', sessId);
+  if (status) params.append('status', status);
+
+  if ([...params].length > 0) {
+    callbackUrl += `?${params.toString()}`;
+  }
+
+  // Redirección a la app si viene de mobile
   if (isMobileUA || isFromApp) {
-    const callbackUrl = `bbvapoc://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    console.log(callbackUrl);
+    console.log('Redireccionando a la app con URL:', callbackUrl);
     res.send(`
       <html>
-        <head>
-          <title>Redirigiendo a la app...</title>
-        </head>
-      <body>
-      <script>
-      // Redirigir con window.location
-      window.location = "${callbackUrl}";
-    </script>
-    </body>
+        <head><title>Redirigiendo a la app...</title></head>
+        <body>
+          <script>window.location = "${callbackUrl}";</script>
+        </body>
       </html>
     `);
   } else {
-    // Comportamiento original (navegador web)
+    // Para navegadores (OAuth desde web)
     res.send(`
       <html>
-        <head>
-          <title>Onboarding completado</title>
-        </head>
+        <head><title>Onboarding completado</title></head>
         <body>
-          <script>
-            window.close();
-          </script>
-          <p>Onboarding completado. Puedes cerrar esta pestaña.</p>
+          <script>window.close();</script>
+          <p>Proceso completado. Puedes cerrar esta pestaña.</p>
         </body>
       </html>
     `);
