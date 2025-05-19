@@ -2,11 +2,11 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-const authStates = {}; // { [state]: { code, timestamp } }
+const authStates = {}; // { [state]: { code, timestamp, sessId, status } }
 
 app.use(express.static('public'));
 
-// Paso 1: página de inicio
+// Página de inicio
 app.get('/start', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -24,16 +24,11 @@ app.get('/start', (req, res) => {
 
         <script>
           async function startFlow() {
-            const state = 'state_' + Math.random().toString(36).substring(2);
-
-            // Pide la URL del login
+            const state = 'mobile_' + Math.random().toString(36).substring(2);
             const res = await fetch('/get-auth-url?state=' + state);
             const data = await res.json();
-
-            // Abre nueva pestaña al login
             window.open(data.authUrl, '_blank');
 
-            // Empieza a hacer polling hasta que esté listo
             const interval = setInterval(async () => {
               const pollRes = await fetch('/poll?state=' + state);
               const pollData = await pollRes.json();
@@ -49,11 +44,10 @@ app.get('/start', (req, res) => {
   `);
 });
 
-// Paso 2: generar la URL de login
+// Generar URL de login
 app.get('/get-auth-url', async (req, res) => {
   const { state } = req.query;
 
-  // Aquí iría tu petición real a authorize.com si fuera POST. Suponiendo que puedes hacer un GET y te responde con 302:
   try {
     const response = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
       params: {
@@ -69,28 +63,31 @@ app.get('/get-auth-url', async (req, res) => {
       validateStatus: status => status === 302,
     });
 
-    const authUrl = response.headers.location;
-    res.json({ authUrl });
+    res.json({ authUrl: response.headers.location });
   } catch (err) {
+    console.error('Error obteniendo auth URL:', err.message);
     res.status(500).json({ error: 'Error obteniendo URL de autorización' });
   }
 });
 
-// Paso 3: login redirige aquí
+// Redirección de BBVA OAuth y 2FA
 app.get('/redirect', (req, res) => {
-  const { code, state } = req.query;
-  authStates[state] = { code, timestamp: Date.now() };
+  const { code, state, status, '2FASESSID': sessId } = req.query;
 
-  console.log('Redirect recibido:', { code, state });
+  if (!state) {
+    return res.status(400).send('Estado inválido');
+  }
+
+  authStates[state] = {
+    code: code || null,
+    sessId: sessId || null,
+    status: status || null,
+    timestamp: Date.now()
+  };
 
   const ua = req.headers['user-agent'] || '';
   const isMobileUA = /iphone|ipad|android/i.test(ua);
-  const isFromApp = state && state.startsWith('mobile_');  // Detectamos por el prefijo
-
-  console.log(`Redirect received. UA: ${ua}, State: ${state}, 2FASESSID: ${sessId}, Status: ${status}`);
-
-  // Construir deep link
-  let callbackUrl = `bbvapoc://callback`;
+  const isFromApp = state.startsWith('mobile_');
 
   const params = new URLSearchParams();
   if (code) params.append('code', code);
@@ -98,23 +95,21 @@ app.get('/redirect', (req, res) => {
   if (sessId) params.append('2FASESSID', sessId);
   if (status) params.append('status', status);
 
-  if ([...params].length > 0) {
-    callbackUrl += `?${params.toString()}`;
-  }
+  const callbackUrl = `bbvapoc://callback${params.toString() ? '?' + params.toString() : ''}`;
 
-  // Redirección a la app si viene de mobile
+  console.log(`Redirect recibido | UA: ${ua} | State: ${state} | Code: ${code} | 2FASESSID: ${sessId} | Status: ${status}`);
+
   if (isMobileUA || isFromApp) {
-    console.log('Redireccionando a la app con URL:', callbackUrl);
+    console.log('Redirigiendo a la app con deep link:', callbackUrl);
     res.send(`
       <html>
-        <head><title>Redirigiendo a la app...</title></head>
+        <head><title>Redirigiendo...</title></head>
         <body>
           <script>window.location = "${callbackUrl}";</script>
         </body>
       </html>
     `);
   } else {
-    // Para navegadores (OAuth desde web)
     res.send(`
       <html>
         <head><title>Onboarding completado</title></head>
@@ -127,18 +122,18 @@ app.get('/redirect', (req, res) => {
   }
 });
 
-// Paso 4: polling del navegador original
+// Polling del cliente para saber si se completó el proceso
 app.get('/poll', (req, res) => {
   const { state } = req.query;
-  const result = authStates[state];
-  if (result) {
-    res.json({ ready: true, code: result.code });
+  const data = authStates[state];
+  if (data?.code) {
+    res.json({ ready: true, code: data.code });
   } else {
     res.json({ ready: false });
   }
 });
 
-// Paso 5: página que muestra el resultado final
+// Mostrar resultado final (solo para debug o vista web)
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
   res.send(`
@@ -164,5 +159,5 @@ app.get('/show', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('Servidor corriendo');
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
