@@ -24,7 +24,7 @@ app.get('/start', (req, res) => {
 
         <script>
           async function startFlow() {
-            const state = 'web_OAuth' + Math.random().toString(36).substring(2);
+            const state = 'web_OAuth_' + Math.random().toString(36).substring(2);
             const res = await fetch('/get-auth-url?state=' + state);
             const data = await res.json();
             window.open(data.authUrl, '_blank');
@@ -155,9 +155,65 @@ app.get('/show', (req, res) => {
           <p><strong>Code:</strong> ${code || 'N/A'}</p>
           <p><strong>State:</strong> ${state || 'N/A'}</p>
         </div>
+        <h1>Me Full</h1>
+        <button onclick="startFlow()">Me Full</button>
+
+        <script>
+          async function startFlow() {
+            const state = 'web_2FA_' + Math.random().toString(36).substring(2);
+            const res = await fetch('/get-auth-url?state=' + state);
+            const data = await res.json();
+            window.open(data.authUrl, '_blank');
+
+            const interval = setInterval(async () => {
+              const pollRes = await fetch('/poll?state=' + state);
+              const pollData = await pollRes.json();
+              if (pollData.ready) {
+                clearInterval(interval);
+                window.location.href = '/show?code=' + encodeURIComponent(pollData.code) + '&state=' + encodeURIComponent(state);
+              }
+            }, 1000);
+          }
+        </script>
       </body>
     </html>
   `);
+});
+
+app.get('/get-2FA', async (req, res) => {
+  const { state } = req.query;
+
+  try {
+    const meFullCall = await fetch('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
+  method: 'GET',
+  headers: {
+    'Host': 'apis.es.bbvaapimarket.com',
+    'Accept': '*/*',
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + accessToken
+  }
+});
+
+if (!meFullCall.ok) {
+  throw new Error(`Error llamando a me-full: ${meFullCall.status}`);
+}
+
+// Para Node.js, necesitas acceder a los headers de forma diferente
+const location = meFullCall.headers.get('location');
+const sessId = meFullCall.headers.get('2fasessid');
+
+// Verifica que se recibieron
+console.log('Location:', location);
+console.log('2FASESSID:', sessId);
+
+// Construir URL para 2FA
+const authUrl = `${location}?2FASESSID=${sessId}&digest=z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==&alg=SHA-512&state=${state}`;
+console.log('2FA URL generada:', authUrl);
+
+  } catch (err) {
+    console.error('Error obteniendo auth URL:', err.message);
+    res.status(500).json({ error: 'Error obteniendo URL de autorización' });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
