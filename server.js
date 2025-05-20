@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-const authStates = {}; // { [state]: { code, timestamp, sessId, status, meStatus } }
+const authStates = {}; // { [state]: { code, timestamp, sessId, status, meStatus, accessToken } }
 
 app.use(express.static('public'));
 
@@ -70,48 +70,67 @@ app.get('/get-auth-url', async (req, res) => {
   }
 });
 
-// Redirección de BBVA OAuth y 2FA
-app.get('/redirect', (req, res) => {
-  const { code, state, status, '2FASESSID': sessId } = req.query;
+// Redirección de BBVA OAuth
+app.get('/redirect', async (req, res) => {
+  const { code, state } = req.query;
 
-  if (!state) {
-    return res.status(400).send('Estado inválido');
+  if (!state || !code) {
+    return res.status(400).send('Faltan parámetros');
   }
 
-  authStates[state] = {
-    code: code || null,
-    sessId: sessId || null,
-    status: status || null,
-    timestamp: Date.now(),
-    meStatus: null
-  };
+  try {
+    // 1. Intercambio de code por access token
+    const tokenRes = await axios.post('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
+      new URLSearchParams({
+        client_id: '174765141853',
+        client_secret: '293ff733e4a241d399bd6b26818ba203',
+        grant_type: 'authorization_code',
+        code,
+        code_verifier: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
+        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': '*/*',
+          'Host': 'apis.es.bbvaapimarket.com'
+        }
+      });
 
-  const ua = req.headers['user-agent'] || '';
-  const isMobileUA = /iphone|ipad|android/i.test(ua);
-  const isFromApp = state.startsWith('mobile_');
+    const accessToken = tokenRes.data.access_token;
 
-  const params = new URLSearchParams();
-  if (code) params.append('code', code);
-  if (state) params.append('state', state);
-  if (sessId) params.append('2FASESSID', sessId);
-  if (status) params.append('status', status);
+    // 2. Llamada a me/full
+    const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/customer-sandbox/v1/customers/me/full', {
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+        'Accept': '*/*',
+        'Content-Type': 'application/json',
+        'Host': 'apis.es.bbvaapimarket.com'
+      },
+      maxRedirects: 0,
+      validateStatus: status => status === 302,
+    });
 
-  const callbackUrl = `bbvapoc://callback${params.toString() ? '?' + params.toString() : ''}`;
+    const sessId = meFullCall.headers['2fasessid'] || meFullCall.headers['2FASESSID'];
+    const location = meFullCall.headers.location;
 
-  console.log(`Redirect recibido | UA: ${ua} | State: ${state} | Code: ${code} | 2FASESSID: ${sessId} | Status: ${status}`);
+    const digest = "z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==";
+    const authUrl = `${location}?2FASESSID=${sessId}&digest=${encodeURIComponent(digest)}&alg=SHA-512&state=${state}`;
 
-  if (isMobileUA || isFromApp) {
-    console.log('Redirigiendo a la app con deep link:', callbackUrl);
-    res.send(`
-      <html>
-        <head><title>Redirigiendo...</title></head>
-        <body>
-          <script>window.location = "${callbackUrl}";</script>
-        </body>
-      </html>
-    `);
-  } else {
-    res.redirect('/show?state=' + encodeURIComponent(state));
+    // Guardar el estado
+    authStates[state] = {
+      code,
+      accessToken,
+      sessId,
+      status: 'ok',
+      timestamp: Date.now(),
+      meStatus: null
+    };
+
+    res.redirect(authUrl);
+  } catch (err) {
+    console.error("Error en redirección /redirect:", err.message);
+    res.status(500).send("Error procesando la redirección");
   }
 });
 
@@ -119,14 +138,14 @@ app.get('/redirect', (req, res) => {
 app.get('/poll', (req, res) => {
   const { state } = req.query;
   const data = authStates[state];
-  if (data?.code) {
-    res.json({ ready: true, code: data.code });
+  if (data?.status === 'ok') {
+    res.json({ ready: true });
   } else {
     res.json({ ready: false });
   }
 });
 
-// Mostrar resultado y llamar a me/status si aplica (web o móvil)
+// Mostrar resultado y llamar a me/status si aplica
 app.get('/show', async (req, res) => {
   const { state } = req.query;
   const record = authStates[state];
@@ -135,48 +154,19 @@ app.get('/show', async (req, res) => {
     return res.status(404).send("Estado no encontrado");
   }
 
-  const { code, sessId, status, meStatus, accessToken: savedToken } = record;
+  const { sessId, status, meStatus, accessToken } = record;
   let meStatusJson = meStatus;
-  let accessToken = savedToken;
 
-  console.log(authStates[state]);
-  console.log(status);
-  console.log(meStatusJson);
-
-  // Si no tenemos meStatus y el flujo fue exitoso
-  if (status === 'ok' && !meStatusJson) {
+  if (status === 'ok' && sessId && accessToken && !meStatusJson) {
     try {
-      // Web: intercambiamos el code por un token nuevo
-      if (code) {
-        const tokenRes = await axios.post('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
-          new URLSearchParams({
-            client_id: '174765141853',
-            client_secret: '293ff733e4a241d399bd6b26818ba203',
-            grant_type: 'authorization_code',
-            code,
-            code_verifier: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
-            redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-          }).toString(),
-          {
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Accept': '*/*',
-              'Host': 'apis.es.bbvaapimarket.com'
-            }
-          });
-
-        accessToken = tokenRes.data.access_token;
-        authStates[state].accessToken = accessToken; // Guardamos para futuras consultas
-      }
-
-      // Ahora, llamamos a me/status
       const meStatusRes = await axios.get(
         `https://apis.es.bbvaapimarket.com/customer-sandbox/v1/customers/me/status?2FASESSID=${sessId}`,
         {
           headers: {
             'Authorization': 'Bearer ' + accessToken
           }
-        });
+        }
+      );
 
       meStatusJson = meStatusRes.data;
       authStates[state].meStatus = meStatusJson;
@@ -203,7 +193,6 @@ app.get('/show', async (req, res) => {
           <p><strong>State:</strong> ${state || 'N/A'}</p>
           <p><strong>2FA Status:</strong> ${status || 'N/A'}</p>
           <p><strong>2FASESSID:</strong> ${sessId || 'N/A'}</p>
-          ${code ? `<p><strong>Code (web):</strong> ${code}</p>` : `<p><strong>Token (móvil):</strong> ${accessToken ? '✔️' : '❌'}</p>`}
           ${meStatusJson
             ? `<h2>Datos de me/status</h2><pre>${JSON.stringify(meStatusJson, null, 2)}</pre>`
             : '<p><em>No se pudo obtener me/status.</em></p>'}
@@ -212,7 +201,6 @@ app.get('/show', async (req, res) => {
     </html>
   `);
 });
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
