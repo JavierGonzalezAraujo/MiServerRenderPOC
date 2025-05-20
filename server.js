@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-const authStates = {}; // { [state]: { code, timestamp, sessId, status, meStatus, accessToken } }
+const authStates = {}; // { [state]: { code, timestamp, sessId, status, meStatus } }
 
 app.use(express.static('public'));
 
@@ -70,67 +70,48 @@ app.get('/get-auth-url', async (req, res) => {
   }
 });
 
-// Redirección de BBVA OAuth
-app.get('/redirect', async (req, res) => {
-  const { code, state } = req.query;
+// Redirección de BBVA OAuth y 2FA
+app.get('/redirect', (req, res) => {
+  const { code, state, status, '2FASESSID': sessId } = req.query;
 
-  if (!state || !code) {
-    return res.status(400).send('Faltan parámetros');
+  if (!state) {
+    return res.status(400).send('Estado inválido');
   }
 
-  try {
-    // 1. Intercambio de code por access token
-    const tokenRes = await axios.post('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
-      new URLSearchParams({
-        client_id: '174765141853',
-        client_secret: '293ff733e4a241d399bd6b26818ba203',
-        grant_type: 'authorization_code',
-        code,
-        code_verifier: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
-        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-      }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': '*/*',
-          'Host': 'apis.es.bbvaapimarket.com'
-        }
-      });
+  authStates[state] = {
+    code: code || null,
+    sessId: sessId || null,
+    status: status || null,
+    timestamp: Date.now(),
+    meStatus: null
+  };
 
-    const accessToken = tokenRes.data.access_token;
+  const ua = req.headers['user-agent'] || '';
+  const isMobileUA = /iphone|ipad|android/i.test(ua);
+  const isFromApp = state.startsWith('mobile_');
 
-    // 2. Llamada a me/full
-    const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/customer-sandbox/v1/customers/me/full', {
-      headers: {
-        'Authorization': 'Bearer ' + accessToken,
-        'Accept': '*/*',
-        'Content-Type': 'application/json',
-        'Host': 'apis.es.bbvaapimarket.com'
-      },
-      maxRedirects: 0,
-      validateStatus: status => status === 302,
-    });
+  const params = new URLSearchParams();
+  if (code) params.append('code', code);
+  if (state) params.append('state', state);
+  if (sessId) params.append('2FASESSID', sessId);
+  if (status) params.append('status', status);
 
-    const sessId = meFullCall.headers['2fasessid'] || meFullCall.headers['2FASESSID'];
-    const location = meFullCall.headers.location;
+  const callbackUrl = `bbvapoc://callback${params.toString() ? '?' + params.toString() : ''}`;
 
-    const digest = "z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==";
-    const authUrl = `${location}?2FASESSID=${sessId}&digest=${encodeURIComponent(digest)}&alg=SHA-512&state=${state}`;
+  console.log(`Redirect recibido | UA: ${ua} | State: ${state} | Code: ${code} | 2FASESSID: ${sessId} | Status: ${status}`);
 
-    // Guardar el estado
-    authStates[state] = {
-      code,
-      accessToken,
-      sessId,
-      status: 'ok',
-      timestamp: Date.now(),
-      meStatus: null
-    };
-
-    res.redirect(authUrl);
-  } catch (err) {
-    console.error("Error en redirección /redirect:", err.message);
-    res.status(500).send("Error procesando la redirección");
+  if (isMobileUA || isFromApp) {
+    console.log('Redirigiendo a la app con deep link:', callbackUrl);
+    res.send(`
+      <html>
+        <head><title>Redirigiendo...</title></head>
+        <body>
+          <script>window.location = "${callbackUrl}";</script>
+        </body>
+      </html>
+    `);
+  } else {
+    res.redirect('/show?state=' + encodeURIComponent(state));
   }
 });
 
@@ -138,14 +119,14 @@ app.get('/redirect', async (req, res) => {
 app.get('/poll', (req, res) => {
   const { state } = req.query;
   const data = authStates[state];
-  if (data?.status === 'ok') {
-    res.json({ ready: true });
+  if (data?.code) {
+    res.json({ ready: true, code: data.code });
   } else {
     res.json({ ready: false });
   }
 });
 
-// Mostrar resultado y llamar a me/status si aplica
+// Mostrar resultado y llamar a me/status si aplica (solo desde web)
 app.get('/show', async (req, res) => {
   const { state } = req.query;
   const record = authStates[state];
@@ -154,25 +135,40 @@ app.get('/show', async (req, res) => {
     return res.status(404).send("Estado no encontrado");
   }
 
-  const { sessId, status, meStatus, accessToken } = record;
+  const { code, sessId, status, meStatus } = record;
   let meStatusJson = meStatus;
 
-  if (status === 'ok' && sessId && accessToken && !meStatusJson) {
+  if (status === 'ok' && !meStatusJson) {
     try {
-      const meStatusRes = await axios.get(
-        `https://apis.es.bbvaapimarket.com/customer-sandbox/v1/customers/me/status?2FASESSID=${sessId}`,
+      const tokenRes = await axios.post('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
+        new URLSearchParams({
+          client_id: '174765141853',
+          client_secret: '293ff733e4a241d399bd6b26818ba203',
+          grant_type: 'authorization_code',
+          code,
+          code_verifier: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
+          redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+        }).toString(),
         {
           headers: {
-            'Authorization': 'Bearer ' + accessToken
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': '*/*',
+            'Host': 'apis.es.bbvaapimarket.com'
           }
+        });
+
+      const accessToken = tokenRes.data.access_token;
+
+      const meStatusRes = await axios.get(`https://apis.es.bbvaapimarket.com/customer-sandbox/v1/customers/me/status?2FASESSID=${sessId}`, {
+        headers: {
+          'Authorization': 'Bearer ' + accessToken
         }
-      );
+      });
 
       meStatusJson = meStatusRes.data;
       authStates[state].meStatus = meStatusJson;
-
     } catch (e) {
-      console.error("Error obteniendo me/status:", e.message);
+      console.error("Error obteniendo meStatus:", e.message);
     }
   }
 
@@ -189,13 +185,11 @@ app.get('/show', async (req, res) => {
       </head>
       <body>
         <div class="box">
-          <h1>Resultado del Onboarding 2FA</h1>
+          <h1>Resultado del Onboarding Web</h1>
+          <p><strong>Code:</strong> ${code || 'N/A'}</p>
           <p><strong>State:</strong> ${state || 'N/A'}</p>
           <p><strong>2FA Status:</strong> ${status || 'N/A'}</p>
-          <p><strong>2FASESSID:</strong> ${sessId || 'N/A'}</p>
-          ${meStatusJson
-            ? `<h2>Datos de me/status</h2><pre>${JSON.stringify(meStatusJson, null, 2)}</pre>`
-            : '<p><em>No se pudo obtener me/status.</em></p>'}
+          ${meStatusJson ? `<h2>Resultado de me/status</h2><pre>${JSON.stringify(meStatusJson, null, 2)}</pre>` : '<p><em>No se pudo obtener el meStatus.</em></p>'}
         </div>
       </body>
     </html>
