@@ -139,6 +139,10 @@ app.get('/show', async (req, res) => {
   let meStatusJson = meStatus;
   let accessToken = savedToken;
 
+  console.log(authStates[state]);
+  console.log(status);
+  console.log(meStatusJson);
+
   // Si no tenemos meStatus y el flujo fue exitoso
   if (status === 'ok' && !meStatusJson) {
     try {
