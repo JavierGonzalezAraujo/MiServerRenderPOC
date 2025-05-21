@@ -163,6 +163,7 @@ app.get('/show', (req, res) => {
         <script>
           async function startFlow() {
             const state = 'web_2FA_' + Math.random().toString(36).substring(2);
+            console.log(state);
             const res = await fetch('/get-2FA?code=' + encodeURIComponent(pollData.code) + '&state=' + encodeURIComponent(state));
             const data = await res.json();
             window.open(data.authUrl, '_blank');
@@ -182,7 +183,7 @@ app.get('/show', (req, res) => {
   `);
 });
 
-app.get('/get-2FA', async (req, res) => {
+app.get('/get-2FA', (req, res) => {
   const { code, state } = req.query;
 
   try {
