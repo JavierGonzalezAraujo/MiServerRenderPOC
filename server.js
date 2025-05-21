@@ -3,7 +3,6 @@ const axios = require('axios');
 const app = express();
 const qs = require('qs'); // Necesario para codificar el body correctamente
 
-
 const authStates = {}; // { [state]: { code, timestamp, sessId, status } }
 
 app.use(express.static('public'));
@@ -141,37 +140,7 @@ app.get('/poll', (req, res) => {
 // Mostrar resultado final (solo para debug o vista web)
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
-  try {
-  const body = qs.stringify({
-    client_id: '174765141853',
-    client_secret: '293ff733e4a241d399bd6b26818ba203',
-    redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-    grant_type: 'authorization_code',
-    code: code, // Asegúrate de que `code` esté definido antes
-    code_verifier: 'JhO-Nk0CeF7vx1c046kpRQEYEQtsCSAHMbbPRbqLW54'
-  });
-
-  const response = await axios.post(
-    'https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
-    body,
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': '*/*'
-      }
-    }
-  );
-
-  // Mostrar la respuesta en consola
-  console.log('Token response JSON:', response.data);
   
-  // Puedes enviar al cliente también si quieres
-  // res.json(response.data);
-
-} catch (err) {
-  console.error('Error obteniendo token:', err.response?.data || err.message);
-  res.status(500).json({ error: 'Error obteniendo token' });
-}
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -217,35 +186,58 @@ app.get('/get-2FA', async (req, res) => {
   const { state } = req.query;
 
   try {
-    const meFullCall = await fetch('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
-  method: 'GET',
-  headers: {
-    'Host': 'apis.es.bbvaapimarket.com',
-    'Accept': '*/*',
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + accessToken
-  }
-});
+    // 1. Solicitar access_token a BBVA
+    const tokenBody = qs.stringify({
+      client_id: '174765141853',
+      client_secret: '293ff733e4a241d399bd6b26818ba203',
+      grant_type: 'client_credentials',
+      scope: 'customers-me customers-me-full'
+    });
 
-if (!meFullCall.ok) {
-  throw new Error(`Error llamando a me-full: ${meFullCall.status}`);
-}
+    const tokenResponse = await axios.post(
+      'https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
+      tokenBody,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': '*/*'
+        }
+      }
+    );
 
-// Para Node.js, necesitas acceder a los headers de forma diferente
-const location = meFullCall.headers.get('location');
-const sessId = meFullCall.headers.get('2fasessid');
+    const accessToken = tokenResponse.data.access_token;
 
-// Verifica que se recibieron
-console.log('Location:', location);
-console.log('2FASESSID:', sessId);
+    if (!accessToken) {
+      throw new Error('No se recibió access_token del servidor de BBVA');
+    }
 
-// Construir URL para 2FA
-const authUrl = `${location}?2FASESSID=${sessId}&digest=z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==&alg=SHA-512&state=${state}`;
-console.log('2FA URL generada:', authUrl);
+    console.log('Access Token recibido:', accessToken);
+
+    // 2. Llamar al endpoint me-full con el token
+    const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
+      headers: {
+        'Accept': '*/*',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    const location = meFullCall.headers['location'];
+    const sessId = meFullCall.headers['2fasessid'];
+
+    if (!location || !sessId) {
+      throw new Error('Faltan headers necesarios de la respuesta de /me-full');
+    }
+
+    // 3. Construir y devolver la URL 2FA
+    const authUrl = `${location}?2FASESSID=${sessId}&digest=z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==&alg=SHA-512&state=${state}`;
+    console.log('2FA URL generada:', authUrl);
+
+    res.json({ authUrl });
 
   } catch (err) {
-    console.error('Error obteniendo auth URL:', err.message);
-    res.status(500).json({ error: 'Error obteniendo URL de autorización' });
+    console.error('Error en /get-2FA:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Error obteniendo URL 2FA' });
   }
 });
 
