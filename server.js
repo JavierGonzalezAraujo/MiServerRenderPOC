@@ -6,6 +6,8 @@ const authStates = {}; // { [state]: { code, timestamp, sessId, status } }
 
 app.use(express.static('public'));
 
+let jsonTokenGlobal;
+
 // Página de inicio
 app.get('/start', (req, res) => {
   res.send(`
@@ -49,12 +51,13 @@ app.get('/get-auth-url', async (req, res) => {
   const { state } = req.query;
 
   try {
-    const response = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
+    // Paso 1: Solicitar el code
+    const authResponse = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
       params: {
         response_type: 'code',
-        client_id: '170773573158',
+        client_id: '174765141853',
         redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-        code_challenge: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
+        code_challenge: 'ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg',
         code_challenge_method: 'S256',
         scope: 'openid',
         state,
@@ -63,12 +66,114 @@ app.get('/get-auth-url', async (req, res) => {
       validateStatus: status => status === 302,
     });
 
-    res.json({ authUrl: response.headers.location });
+    const location = authResponse.headers.location;
+    console.log("Redirect Location:", location);
+
+    // Extraer el "code" de la URL de redirección
+    const redirectUrl = new URL(location);
+    const code = redirectUrl.searchParams.get('code');
+
+    if (!code) {
+      return res.status(400).json({ error: 'No se encontró el parámetro code en la redirección' });
+    }
+
+    // Paso 2: Intercambiar el code por un token
+    const body = new URLSearchParams({
+      client_id: '174765141853',
+      client_secret: '293ff733e4a241d399bd6b26818ba203',
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: 'ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg',
+      redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+    }).toString();
+
+    const tokenResponse = await fetch('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Host': 'apis.es.bbvaapimarket.com',
+        'Accept': '*/*'
+      },
+      body
+    });
+
+app.get('/get-auth-url', async (req, res) => {
+  const { state } = req.query;
+
+  try {
+    // Paso 1: Solicitar el code
+    const authResponse = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
+      params: {
+        response_type: 'code',
+        client_id: '174765141853',
+        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+        code_challenge: 'ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg',
+        code_challenge_method: 'S256',
+        scope: 'openid',
+        state,
+      },
+      maxRedirects: 0,
+      validateStatus: status => status === 302,
+    });
+
+    const location = authResponse.headers.location;
+    console.log("Redirect Location:", location);
+
+    // Extraer el "code" de la URL de redirección
+    const redirectUrl = new URL(location);
+    const code = redirectUrl.searchParams.get('code');
+
+    if (!code) {
+      return res.status(400).json({ error: 'No se encontró el parámetro code en la redirección' });
+    }
+
+    // Paso 2: Intercambiar el code por un token
+    const body = new URLSearchParams({
+      client_id: '174765141853',
+      client_secret: '293ff733e4a241d399bd6b26818ba203',
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: 'ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg',
+      redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+    }).toString();
+
+    const tokenResponse = await fetch('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Host': 'apis.es.bbvaapimarket.com',
+        'Accept': '*/*'
+      },
+      body
+    });
+
+    const jsonToken = await tokenResponse.json();
+    jsonTokenGlobal = jsonToken;
+    console.log('Access Token:', jsonToken);
+
+    res.json({
+      access_token: jsonToken.access_token,
+      full_token_response: jsonToken,
+    });
+
   } catch (err) {
-    console.error('Error obteniendo auth URL:', err.message);
-    res.status(500).json({ error: 'Error obteniendo URL de autorización' });
+    console.error('Error en flujo OAuth:', err.message);
+    res.status(500).json({ error: 'Error durante el flujo de autorización' });
   }
 });
+    console.log('Access Token:', jsonToken);
+
+    res.json({
+      access_token: jsonToken.access_token,
+      full_token_response: jsonToken,
+    });
+
+  } catch (err) {
+    console.error('Error en flujo OAuth:', err.message);
+    res.status(500).json({ error: 'Error durante el flujo de autorización' });
+  }
+});
+
 
 // Redirección de BBVA OAuth y 2FA
 app.get('/redirect', (req, res) => {
