@@ -163,7 +163,7 @@ app.get('/show', (req, res) => {
         <script>
           async function startFlow() {
             const state = 'web_2FA_' + Math.random().toString(36).substring(2);
-            const res = await fetch('/get-2FA?state=' + state);
+            const res = await fetch('/get-2FA?code=' + encodeURIComponent(pollData.code) + '&state=' + encodeURIComponent(state));
             const data = await res.json();
             window.open(data.authUrl, '_blank');
 
@@ -183,15 +183,17 @@ app.get('/show', (req, res) => {
 });
 
 app.get('/get-2FA', async (req, res) => {
-  const { state } = req.query;
+  const { code, state } = req.query;
 
   try {
     // 1. Solicitar access_token a BBVA
     const tokenBody = qs.stringify({
       client_id: '174765141853',
       client_secret: '293ff733e4a241d399bd6b26818ba203',
-      grant_type: 'client_credentials',
-      scope: 'customers-me customers-me-full'
+      grant_type: 'authorization_code',
+      code: code,
+      code_verifier: "01AmgdmIuI54GNvwREgLOEXAcr0XiWe1azV3z04PVyo",
+      redirect_uri: "https://miserverrenderpoc.onrender.com/redirect"
     });
 
     const tokenResponse = await axios.post(
