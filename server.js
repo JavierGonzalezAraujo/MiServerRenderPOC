@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const app = express();
+const qs = require('qs'); // Necesario para codificar el body correctamente
+
 
 const authStates = {}; // { [state]: { code, timestamp, sessId, status } }
 
@@ -54,7 +56,7 @@ app.get('/get-auth-url', async (req, res) => {
         response_type: 'code',
         client_id: '170773573158',
         redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-        code_challenge: "ns4X6fzxbwAGpW3VoccetElEmldbLHChSMjfDACiHhg",
+        code_challenge: "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
         code_challenge_method: 'S256',
         scope: 'openid',
         state,
@@ -139,6 +141,37 @@ app.get('/poll', (req, res) => {
 // Mostrar resultado final (solo para debug o vista web)
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
+  try {
+  const body = qs.stringify({
+    client_id: '174765141853',
+    client_secret: '293ff733e4a241d399bd6b26818ba203',
+    redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
+    grant_type: 'authorization_code',
+    code: code, // Asegúrate de que `code` esté definido antes
+    code_verifier: 'JhO-Nk0CeF7vx1c046kpRQEYEQtsCSAHMbbPRbqLW54'
+  });
+
+  const response = await axios.post(
+    'https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
+    body,
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': '*/*'
+      }
+    }
+  );
+
+  // Mostrar la respuesta en consola
+  console.log('Token response JSON:', response.data);
+  
+  // Puedes enviar al cliente también si quieres
+  // res.json(response.data);
+
+} catch (err) {
+  console.error('Error obteniendo token:', err.response?.data || err.message);
+  res.status(500).json({ error: 'Error obteniendo token' });
+}
   res.send(`
     <!DOCTYPE html>
     <html>
