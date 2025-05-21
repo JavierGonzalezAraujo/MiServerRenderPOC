@@ -111,18 +111,6 @@ app.get('/get-auth-url', async (req, res) => {
     res.status(500).json({ error: 'Error durante el flujo de autorización' });
   }
 });
-    console.log('Access Token:', jsonToken);
-
-    res.json({
-      access_token: jsonToken.access_token,
-      full_token_response: jsonToken,
-    });
-
-  } catch (err) {
-    console.error('Error en flujo OAuth:', err.message);
-    res.status(500).json({ error: 'Error durante el flujo de autorización' });
-  }
-});
 
 
 // Redirección de BBVA OAuth y 2FA
