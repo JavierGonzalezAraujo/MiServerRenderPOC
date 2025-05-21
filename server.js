@@ -161,7 +161,7 @@ app.get('/show', (req, res) => {
         <script>
           async function startFlow() {
             const state = 'web_2FA_' + Math.random().toString(36).substring(2);
-            const res = await fetch('/get-auth-url?state=' + state);
+            const res = await fetch('/get-2FA?state=' + state);
             const data = await res.json();
             window.open(data.authUrl, '_blank');
 
