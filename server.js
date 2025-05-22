@@ -189,7 +189,7 @@ app.get('/get-2FA', async (req, res) => {
   const { code, state } = req.query;
 
   try {
-    // 1. Obtener el token
+    // 1. Obtener el access_token
     const tokenBody = qs.stringify({
       client_id: '174765141853',
       client_secret: '293ff733e4a241d399bd6b26818ba203',
@@ -213,34 +213,37 @@ app.get('/get-2FA', async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     if (!accessToken) throw new Error('No access_token recibido');
 
-    // 2. Llamar a /me-full sin seguir redirección
+    // 2. Llamar a /me-full y capturar 401 con cabecera location
     const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
       headers: {
         'Accept': '*/*',
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`
       },
-      maxRedirects: 0,
-      validateStatus: status => status >= 200 && status < 400
+      // 👇 Importante para capturar 401
+      validateStatus: status => status === 401
     });
 
     const location = meFullCall.headers['location'];
     const sessId = meFullCall.headers['2fasessid'];
 
-    if (!location || !sessId) throw new Error('Headers 2FA no disponibles');
+    if (!location || !sessId) {
+      throw new Error('Headers location o 2fasessid no presentes en 401');
+    }
 
     const digest = 'z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==';
     const authUrl = `${location}?2FASESSID=${sessId}&digest=${encodeURIComponent(digest)}&alg=SHA-512&state=${encodeURIComponent(state)}`;
 
-    console.log('URL 2FA:', authUrl);
+    console.log('✅ 2FA URL construida correctamente:', authUrl);
 
     res.json({ authUrl });
 
   } catch (err) {
-    console.error('Error en /get-2FA:', err.response?.data || err.message);
+    console.error('❌ Error en /get-2FA:', err.response?.data || err.message);
     res.status(500).json({ error: 'Error en flujo 2FA' });
   }
 });
+
 
 
 const PORT = process.env.PORT || 3000;
