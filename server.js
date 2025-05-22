@@ -64,14 +64,35 @@ app.get('/get-auth-url', (req, res) => {
 });
 
 // Redirección BBVA
-app.get('/redirect', (req, res) => {
+app.get('/redirect', async (req, res) => {
   const { code, state, status, '2FASESSID': sessId } = req.query;
 
   if (!state || !authStates[state]) {
     return res.status(400).send('Estado inválido');
   }
 
-  Object.assign(authStates[state], { code, status, sessId, timestamp: Date.now() });
+  const stateData = authStates[state];
+  Object.assign(stateData, { code, status, sessId, timestamp: Date.now() });
+
+  let json2FA = null;
+
+  if (sessId) {
+    try {
+      const result = await axios.get(`https://apis.es.bbvaapimarket.com/auth/2fa/v1/status?2FASESSID=${sessId}`, {
+        headers: {
+          'Authorization': `Bearer ${stateData.accessToken}`,
+          'Accept': '*/*'
+        },
+        validateStatus: () => true
+      });
+
+      json2FA = result.data;
+      stateData.json2FA = json2FA;
+      console.log('✅ Respuesta de 2FA status:', json2FA);
+    } catch (e) {
+      console.error('❌ Error en /auth/2fa/v1/status:', e.response?.data || e.message);
+    }
+  }
 
   const isMobileUA = /iphone|ipad|android/i.test(req.headers['user-agent'] || '');
   const isFromApp = state.startsWith('mobile_');
@@ -91,6 +112,7 @@ app.get('/redirect', (req, res) => {
   }
 });
 
+
 // Poll
 app.get('/poll', (req, res) => {
   const data = authStates[req.query.state];
@@ -100,12 +122,19 @@ app.get('/poll', (req, res) => {
 // Mostrar resultado y botón 2FA
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
+  const stateData = authStates[state] || {};
+  const json2FA = stateData.json2FA;
+
   res.send(`
     <html>
-      <body>
+      <body style="font-family: sans-serif; padding: 2rem;">
         <h1>Autenticado</h1>
         <p><b>Code:</b> ${code}</p>
-        <button onclick="start2FA()">Me Full</button>
+        <p><b>State:</b> ${state}</p>
+        <button onclick="start2FA()">Repetir Me Full</button>
+        <h2>Respuesta 2FA</h2>
+        <pre style="background:#eee;padding:1rem;border-radius:8px;">${json2FA ? JSON.stringify(json2FA, null, 2) : 'No disponible'}</pre>
+
         <script>
           async function start2FA() {
             const res = await fetch('/get-2FA?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}');
@@ -121,6 +150,7 @@ app.get('/show', (req, res) => {
     </html>
   `);
 });
+
 
 // get-2FA
 app.get('/get-2FA', async (req, res) => {
@@ -148,6 +178,7 @@ app.get('/get-2FA', async (req, res) => {
     });
 
     const accessToken = tokenResponse.data.access_token;
+    stateData.accessToken = accessToken;
     if (!accessToken) throw new Error('No se recibió access_token');
 
     // Llamar me-full
