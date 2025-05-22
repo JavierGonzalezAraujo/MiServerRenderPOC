@@ -53,7 +53,7 @@ app.get('/get-auth-url', (req, res) => {
 
   const authUrl = new URL('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize');
   authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('client_id', '170773573158');
+  authUrl.searchParams.set('client_id', '174765141853');
   authUrl.searchParams.set('redirect_uri', 'https://miserverrenderpoc.onrender.com/redirect');
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
