@@ -189,7 +189,7 @@ app.get('/get-2FA', async (req, res) => {
   const { code, state } = req.query;
 
   try {
-    // 1. Solicitar access_token
+    // 1. Obtener el token
     const tokenBody = qs.stringify({
       client_id: '174765141853',
       client_secret: '293ff733e4a241d399bd6b26818ba203',
@@ -211,27 +211,28 @@ app.get('/get-2FA', async (req, res) => {
     );
 
     const accessToken = tokenResponse.data.access_token;
-    if (!accessToken) throw new Error('No se recibió access_token');
+    if (!accessToken) throw new Error('No access_token recibido');
 
-    console.log('Access Token recibido:', accessToken);
-
-    // 2. Llamar a /me-full para forzar 2FA
+    // 2. Llamar a /me-full sin seguir redirección
     const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
       headers: {
         'Accept': '*/*',
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`
-      }
+      },
+      maxRedirects: 0,
+      validateStatus: status => status >= 200 && status < 400
     });
 
     const location = meFullCall.headers['location'];
     const sessId = meFullCall.headers['2fasessid'];
 
-    if (!location || !sessId) throw new Error('Faltan headers location o 2fasessid');
+    if (!location || !sessId) throw new Error('Headers 2FA no disponibles');
 
-    const authUrl = `${location}?2FASESSID=${sessId}&digest=z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==&alg=SHA-512&state=${state}`;
+    const digest = 'z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==';
+    const authUrl = `${location}?2FASESSID=${sessId}&digest=${encodeURIComponent(digest)}&alg=SHA-512&state=${encodeURIComponent(state)}`;
 
-    console.log('URL 2FA generada:', authUrl);
+    console.log('URL 2FA:', authUrl);
 
     res.json({ authUrl });
 
@@ -240,6 +241,7 @@ app.get('/get-2FA', async (req, res) => {
     res.status(500).json({ error: 'Error en flujo 2FA' });
   }
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
