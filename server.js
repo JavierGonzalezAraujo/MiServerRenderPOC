@@ -116,8 +116,16 @@ app.get('/redirect', async (req, res) => {
 // Poll
 app.get('/poll', (req, res) => {
   const data = authStates[req.query.state];
-  res.json({ ready: !!data?.code && !!data?.json2FA, code: data?.code });
+
+  const isAwaiting2FA = !!data?.awaiting2FA;
+
+  const ready = isAwaiting2FA
+    ? !!data?.code && !!data?.json2FA // Segunda fase: espera json2FA
+    : !!data?.code;                   // Primera fase: basta con code
+
+  res.json({ ready, code: data?.code });
 });
+
 
 
 // Mostrar resultado y botón 2FA
@@ -157,6 +165,8 @@ app.get('/show', (req, res) => {
 app.get('/get-2FA', async (req, res) => {
   const { code, state } = req.query;
   const stateData = authStates[state];
+
+  authStates[state].awaiting2FA = true;
 
   if (!stateData || !stateData.codeVerifier) {
     return res.status(400).json({ error: 'Estado inválido o faltan datos' });
