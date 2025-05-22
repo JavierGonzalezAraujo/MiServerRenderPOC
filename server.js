@@ -64,22 +64,16 @@ app.get('/get-auth-url', (req, res) => {
 });
 
 // Redirección BBVA
-app.get('/redirect', async (req, res) => {
+app.get('/redirect', (req, res) => {
   const { code, state, status, '2FASESSID': sessId } = req.query;
 
-  if (!state) {
+  if (!state || !authStates[state]) {
     return res.status(400).send('Estado inválido');
   }
 
-  authStates[state] = {
-    code: code || null,
-    sessId: sessId || null,
-    status: status || null,
-    timestamp: Date.now()
-  };
+  Object.assign(authStates[state], { code, status, sessId, timestamp: Date.now() });
 
-  const ua = req.headers['user-agent'] || '';
-  const isMobileUA = /iphone|ipad|android/i.test(ua);
+  const isMobileUA = /iphone|ipad|android/i.test(req.headers['user-agent'] || '');
   const isFromApp = state.startsWith('mobile_');
 
   const params = new URLSearchParams();
@@ -88,101 +82,14 @@ app.get('/redirect', async (req, res) => {
   if (sessId) params.append('2FASESSID', sessId);
   if (status) params.append('status', status);
 
-  const callbackUrl = `bbvapoc://callback${params.toString() ? '?' + params.toString() : ''}`;
-
-  console.log(`🔁 Redirección recibida:
-    UA: ${ua}
-    Code: ${code}
-    State: ${state}
-    2FASESSID: ${sessId}
-    Status: ${status}
-  `);
+  const callbackUrl = `bbvapoc://callback?${params.toString()}`;
 
   if (isMobileUA || isFromApp) {
-    return res.send(`
-      <html><head><title>Redirigiendo...</title></head>
-      <body><script>window.location = "${callbackUrl}";</script></body>
-      </html>
-    `);
+    res.send(`<script>window.location = "${callbackUrl}";</script>`);
+  } else {
+    res.send(`<script>window.close();</script><p>Proceso completado.</p>`);
   }
-
-  // Si hay un código y el flujo ya pasó por 2FA, intentar obtener el perfil con me-full
-  let userData = null;
-  if (code && sessId) {
-    try {
-      const tokenBody = qs.stringify({
-        client_id: '174765141853',
-        client_secret: '293ff733e4a241d399bd6b26818ba203',
-        grant_type: 'authorization_code',
-        code,
-        code_verifier: '01AmgdmIuI54GNvwREgLOEXAcr0XiWe1azV3z04PVyo',
-        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-      });
-
-      const tokenResponse = await axios.post(
-        'https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
-        tokenBody,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': '*/*'
-          }
-        }
-      );
-
-      const accessToken = tokenResponse.data.access_token;
-
-      if (accessToken) {
-        const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
-          headers: {
-            'Accept': '*/*',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          validateStatus: () => true // Para capturar posibles errores 401, etc.
-        });
-
-        if (meFullCall.status === 200) {
-          userData = meFullCall.data;
-        } else {
-          userData = { error: `Error al llamar a me-full: ${meFullCall.status}`, details: meFullCall.data };
-        }
-      }
-    } catch (err) {
-      userData = { error: 'Excepción al obtener perfil', message: err.message };
-    }
-  }
-
-  res.send(`
-    <html>
-      <head>
-        <title>Resultado del Onboarding</title>
-        <style>
-          body { font-family: Arial; padding: 2rem; background: #f8f8f8; }
-          .box { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-          pre { background: #eee; padding: 1rem; border-radius: 4px; overflow-x: auto; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <h1>Onboarding completado</h1>
-          <p><strong>Code:</strong> ${code || 'N/A'}</p>
-          <p><strong>State:</strong> ${state || 'N/A'}</p>
-          <p><strong>Status:</strong> ${status || 'N/A'}</p>
-          <p><strong>2FASESSID:</strong> ${sessId || 'N/A'}</p>
-
-          ${userData ? `
-            <h2>Respuesta de /me-full</h2>
-            <pre>${JSON.stringify(userData, null, 2)}</pre>
-          ` : `
-            <p style="color: gray;">(Aún no se ha realizado la llamada a /me-full o no hubo 2FA completado)</p>
-          `}
-        </div>
-      </body>
-    </html>
-  `);
 });
-
 
 // Poll
 app.get('/poll', (req, res) => {
