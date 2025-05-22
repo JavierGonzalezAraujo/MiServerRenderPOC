@@ -67,9 +67,19 @@ app.get('/get-auth-url', (req, res) => {
 app.get('/redirect', async (req, res) => {
   const { code, state, status, '2FASESSID': sessId } = req.query;
 
-  if (!state || !authStates[state]) {
+if (!state) {
+  return res.status(400).send('Falta parámetro state');
+}
+
+if (!authStates[state]) {
+  // Permitir flujo de app sin haber pasado por /get-auth-url
+  if (state.startsWith('mobile_')) {
+    authStates[state] = {};
+  } else {
     return res.status(400).send('Estado inválido');
   }
+}
+
 
   const stateData = authStates[state];
   Object.assign(stateData, { code, status, sessId, timestamp: Date.now() });
