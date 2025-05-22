@@ -224,6 +224,8 @@ app.get('/get-2FA', async (req, res) => {
       validateStatus: status => status === 401
     });
 
+    console.log(meFullCall.headers);
+
     const location = meFullCall.headers['location'];
     const sessId = meFullCall.headers['2fasessid'];
 
