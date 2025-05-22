@@ -1,28 +1,28 @@
+// server.js
 const express = require('express');
 const axios = require('axios');
-const app = express();
+const crypto = require('crypto');
 const qs = require('qs');
+const app = express();
 
-const authStates = {}; // Almacena estado por "state": { code, sessId, status, timestamp }
+const authStates = {}; // { [state]: { codeVerifier, code, sessId, status } }
 
 app.use(express.static('public'));
 
-// Página de inicio con botón "Iniciar"
+function generateCodeVerifierAndChallenge() {
+  const codeVerifier = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(codeVerifier).digest();
+  const codeChallenge = hash.toString('base64url');
+  return { codeVerifier, codeChallenge };
+}
+
+// Página inicial
 app.get('/start', (req, res) => {
   res.send(`
-    <!DOCTYPE html>
     <html>
-      <head>
-        <title>Iniciar Onboarding</title>
-        <style>
-          body { font-family: Arial; padding: 2rem; }
-          button { padding: 1rem; font-size: 1rem; cursor: pointer; }
-        </style>
-      </head>
       <body>
         <h1>Iniciar Onboarding</h1>
         <button onclick="startFlow()">Iniciar</button>
-
         <script>
           async function startFlow() {
             const state = 'web_OAuth_' + Math.random().toString(36).substring(2);
@@ -45,47 +45,35 @@ app.get('/start', (req, res) => {
   `);
 });
 
-// Generar URL de login OAuth
-app.get('/get-auth-url', async (req, res) => {
+// Obtener auth URL
+app.get('/get-auth-url', (req, res) => {
   const { state } = req.query;
+  const { codeVerifier, codeChallenge } = generateCodeVerifierAndChallenge();
+  authStates[state] = { codeVerifier };
 
-  try {
-    const response = await axios.get('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize', {
-      params: {
-        response_type: 'code',
-        client_id: '170773573158',
-        redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect',
-        code_challenge: "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
-        code_challenge_method: 'S256',
-        scope: 'openid',
-        state,
-      },
-      maxRedirects: 0,
-      validateStatus: status => status === 302,
-    });
+  const authUrl = new URL('https://apis.es.bbvaapimarket.com/auth/oauth/v2/authorize');
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('client_id', '170773573158');
+  authUrl.searchParams.set('redirect_uri', 'https://miserverrenderpoc.onrender.com/redirect');
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
+  authUrl.searchParams.set('scope', 'openid');
+  authUrl.searchParams.set('state', state);
 
-    res.json({ authUrl: response.headers.location });
-  } catch (err) {
-    console.error('Error obteniendo auth URL:', err.message);
-    res.status(500).json({ error: 'Error obteniendo URL de autorización' });
-  }
+  res.json({ authUrl: authUrl.toString() });
 });
 
-// Redirección después del login OAuth o del 2FA
+// Redirección BBVA
 app.get('/redirect', (req, res) => {
   const { code, state, status, '2FASESSID': sessId } = req.query;
 
-  if (!state) return res.status(400).send('Estado inválido');
+  if (!state || !authStates[state]) {
+    return res.status(400).send('Estado inválido');
+  }
 
-  authStates[state] = {
-    code: code || null,
-    sessId: sessId || null,
-    status: status || null,
-    timestamp: Date.now()
-  };
+  Object.assign(authStates[state], { code, status, sessId, timestamp: Date.now() });
 
-  const ua = req.headers['user-agent'] || '';
-  const isMobileUA = /iphone|ipad|android/i.test(ua);
+  const isMobileUA = /iphone|ipad|android/i.test(req.headers['user-agent'] || '');
   const isFromApp = state.startsWith('mobile_');
 
   const params = new URLSearchParams();
@@ -94,89 +82,39 @@ app.get('/redirect', (req, res) => {
   if (sessId) params.append('2FASESSID', sessId);
   if (status) params.append('status', status);
 
-  const callbackUrl = `bbvapoc://callback${params.toString() ? '?' + params.toString() : ''}`;
-
-  console.log(`Redirección recibida:
-    UA: ${ua}
-    Code: ${code}
-    State: ${state}
-    2FASESSID: ${sessId}
-    Status: ${status}`);
+  const callbackUrl = `bbvapoc://callback?${params.toString()}`;
 
   if (isMobileUA || isFromApp) {
-    res.send(`
-      <html>
-        <head><title>Redirigiendo...</title></head>
-        <body>
-          <script>window.location = "${callbackUrl}";</script>
-        </body>
-      </html>
-    `);
+    res.send(`<script>window.location = "${callbackUrl}";</script>`);
   } else {
-    res.send(`
-      <html>
-        <head><title>Onboarding completado</title></head>
-        <body>
-          <p>Proceso completado. Puedes cerrar esta pestaña.</p>
-          <script>window.close();</script>
-        </body>
-      </html>
-    `);
+    res.send(`<script>window.close();</script><p>Proceso completado.</p>`);
   }
 });
 
-// Polling desde el frontend para saber si ya hay código
+// Poll
 app.get('/poll', (req, res) => {
-  const { state } = req.query;
-  const data = authStates[state];
-  if (data?.code) {
-    res.json({ ready: true, code: data.code });
-  } else {
-    res.json({ ready: false });
-  }
+  const data = authStates[req.query.state];
+  res.json({ ready: !!data?.code, code: data?.code });
 });
 
-// Página de resumen y botón para lanzar flujo 2FA
+// Mostrar resultado y botón 2FA
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
-
   res.send(`
-    <!DOCTYPE html>
     <html>
-      <head>
-        <title>Resultado del Onboarding</title>
-        <style>
-          body { font-family: Arial; padding: 2rem; background-color: #f5f5f5; }
-          .box { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        </style>
-      </head>
       <body>
-        <div class="box">
-          <h1>Autenticación completada</h1>
-          <p><strong>Code:</strong> ${code || 'N/A'}</p>
-          <p><strong>State:</strong> ${state || 'N/A'}</p>
-        </div>
-        <h1>Flujo 2FA</h1>
-        <button onclick="startFlow()">Me Full</button>
-
+        <h1>Autenticado</h1>
+        <p><b>Code:</b> ${code}</p>
+        <button onclick="start2FA()">Me Full</button>
         <script>
-          async function startFlow() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const originalCode = urlParams.get('code');
-            const state = 'web_2FA_' + Math.random().toString(36).substring(2);
-
-            const res = await fetch('/get-2FA?code=' + encodeURIComponent(originalCode) + '&state=' + encodeURIComponent(state));
+          async function start2FA() {
+            const res = await fetch('/get-2FA?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}');
             const data = await res.json();
-            window.open(data.authUrl, '_blank');
-
-            const interval = setInterval(async () => {
-              const pollRes = await fetch('/poll?state=' + state);
-              const pollData = await pollRes.json();
-              if (pollData.ready) {
-                clearInterval(interval);
-                window.location.href = '/show?code=' + encodeURIComponent(pollData.code) + '&state=' + encodeURIComponent(state);
-              }
-            }, 1000);
+            if (data.authUrl) {
+              window.open(data.authUrl, '_blank');
+            } else {
+              alert('Error en 2FA');
+            }
           }
         </script>
       </body>
@@ -184,71 +122,58 @@ app.get('/show', (req, res) => {
   `);
 });
 
-// Paso 2FA: obtener token y luego llamar a /me-full para generar URL de 2FA
+// get-2FA
 app.get('/get-2FA', async (req, res) => {
   const { code, state } = req.query;
+  const stateData = authStates[state];
+
+  if (!stateData || !stateData.codeVerifier) {
+    return res.status(400).json({ error: 'Estado inválido o faltan datos' });
+  }
 
   try {
-    // 1. Obtener el access_token
     const tokenBody = qs.stringify({
       client_id: '174765141853',
       client_secret: '293ff733e4a241d399bd6b26818ba203',
       grant_type: 'authorization_code',
-      code: code,
-      code_verifier: "01AmgdmIuI54GNvwREgLOEXAcr0XiWe1azV3z04PVyo",
-      redirect_uri: "https://miserverrenderpoc.onrender.com/redirect"
+      code,
+      code_verifier: stateData.codeVerifier,
+      redirect_uri: 'https://miserverrenderpoc.onrender.com/redirect'
     });
 
-    const tokenResponse = await axios.post(
-      'https://apis.es.bbvaapimarket.com/auth/oauth/v2/token',
-      tokenBody,
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': '*/*'
-        }
+    const tokenResponse = await axios.post('https://apis.es.bbvaapimarket.com/auth/oauth/v2/token', tokenBody, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
       }
-    );
+    });
 
     const accessToken = tokenResponse.data.access_token;
-    if (!accessToken) throw new Error('No access_token recibido');
+    if (!accessToken) throw new Error('No se recibió access_token');
 
-    // 2. Llamar a /me-full y capturar 401 con cabecera location
-    const meFullCall = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
+    // Llamar me-full
+    const meFullResponse = await axios.get('https://apis.es.bbvaapimarket.com/es/customers/v2/me-full', {
       headers: {
+        'Authorization': `Bearer ${accessToken}`,
         'Accept': '*/*',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
+        'Content-Type': 'application/json'
       },
-      // 👇 Importante para capturar 401
-      validateStatus: status => status === 401
+      validateStatus: () => true
     });
 
-    console.log(meFullCall.headers);
-
-    const location = meFullCall.headers['location'];
-    const sessId = meFullCall.headers['2fasessid'];
-
-    if (!location || !sessId) {
-      throw new Error('Headers location o 2fasessid no presentes en 401');
+    if (meFullResponse.status === 401 && meFullResponse.headers['location'] && meFullResponse.headers['2fasessid']) {
+      const location = meFullResponse.headers['location'];
+      const sessId = meFullResponse.headers['2fasessid'];
+      const authUrl = `${location}?2FASESSID=${sessId}&digest=z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==&alg=SHA-512&state=${state}`;
+      return res.json({ authUrl });
     }
 
-    const digest = 'z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==';
-    const authUrl = `${location}?2FASESSID=${sessId}&digest=${encodeURIComponent(digest)}&alg=SHA-512&state=${encodeURIComponent(state)}`;
-
-    console.log('✅ 2FA URL construida correctamente:', authUrl);
-
-    res.json({ authUrl });
+    throw new Error('me-full no requirió 2FA o faltan headers');
 
   } catch (err) {
-    console.error('❌ Error en /get-2FA:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Error en flujo 2FA' });
+    console.error('Error en /get-2FA:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Error obteniendo URL 2FA' });
   }
 });
 
-
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
