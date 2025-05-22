@@ -131,18 +131,13 @@ app.get('/poll', (req, res) => {
 // Mostrar resultado y botón 2FA
 app.get('/show', (req, res) => {
   const { code, state } = req.query;
-  const stateData = authStates[state] || {};
-  const json2FA = stateData.json2FA;
-
   res.send(`
     <html>
-      <body style="font-family: sans-serif; padding: 2rem;">
+      <body>
         <h1>Autenticado</h1>
         <p><b>Code:</b> ${code}</p>
-        <p><b>State:</b> ${state}</p>
-        <button onclick="start2FA()">Repetir Me Full</button>
-        <h2>Respuesta 2FA</h2>
-        <pre style="background:#eee;padding:1rem;border-radius:8px;">${json2FA ? JSON.stringify(json2FA, null, 2) : 'No disponible'}</pre>
+        <button onclick="start2FA()">Me Full</button>
+        <div id="response"></div>
 
         <script>
           async function start2FA() {
@@ -150,6 +145,17 @@ app.get('/show', (req, res) => {
             const data = await res.json();
             if (data.authUrl) {
               window.open(data.authUrl, '_blank');
+
+              const interval = setInterval(async () => {
+                const r = await fetch('/show-data?state=${encodeURIComponent(state)}');
+                const d = await r.json();
+                if (d.json2FA) {
+                  clearInterval(interval);
+                  document.getElementById("response").innerHTML =
+                    "<h3>Respuesta 2FA:</h3><pre style='background:#eee;padding:1rem;border-radius:8px;'>" +
+                    JSON.stringify(d.json2FA, null, 2) + "</pre>";
+                }
+              }, 1000);
             } else {
               alert('Error en 2FA');
             }
@@ -160,6 +166,11 @@ app.get('/show', (req, res) => {
   `);
 });
 
+app.get('/show-data', (req, res) => {
+  const { state } = req.query;
+  const data = authStates[state];
+  res.json({ json2FA: data?.json2FA || null });
+});
 
 // get-2FA
 app.get('/get-2FA', async (req, res) => {
