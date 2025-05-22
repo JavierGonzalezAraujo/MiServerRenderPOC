@@ -116,8 +116,9 @@ app.get('/redirect', async (req, res) => {
 // Poll
 app.get('/poll', (req, res) => {
   const data = authStates[req.query.state];
-  res.json({ ready: !!data?.code, code: data?.code });
+  res.json({ ready: !!data?.code && !!data?.json2FA, code: data?.code });
 });
+
 
 // Mostrar resultado y botón 2FA
 app.get('/show', (req, res) => {
